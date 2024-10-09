@@ -24,29 +24,33 @@ def price_format(val):
             return '{:,.15f}'.format(val)
     return "N/A"  # Return "N/A" for non-numeric values
 
-@st.cache_data(ttl=86400)  # Cache the data for 24 hours (86400 seconds)
+@st.cache_data(ttl=86400)
 def get_top_500_usdt_pairs_by_volume():
     try:
         response = requests.get('https://api.binance.com/api/v3/ticker/24hr')
         tickers = response.json()
         
-        # Log the response in case it's not as expected
+        # Debug the response to make sure it's valid
         print(f"API response: {tickers}")
         
-        # Check if the response is a valid list
         if isinstance(tickers, list):
-            df = pd.DataFrame(tickers)
-            df = df[df['symbol'].str.endswith('USDT')]
-            df['volume'] = pd.to_numeric(df['volume'], errors='coerce')
-            top_500_usdt_pairs = df.sort_values('volume', ascending=False).head(500)
-            st.write(top_500_usdt_pairs['symbol'].tolist())
-            return top_500_usdt_pairs['symbol'].tolist()
+            # Ensure the data has the expected structure
+            if all(isinstance(item, dict) for item in tickers):
+                df = pd.DataFrame(tickers)
+                df = df[df['symbol'].str.endswith('USDT')]
+                df['volume'] = pd.to_numeric(df['volume'], errors='coerce')
+                top_500_usdt_pairs = df.sort_values('volume', ascending=False).head(500)
+                return top_500_usdt_pairs['symbol'].tolist()
+            else:
+                st.write("Error: API response does not contain a list of dictionaries.")
+                return []
         else:
-            st.write("Error: Unexpected API response structure")
+            st.write("Error: Unexpected API response format.")
             return []
     except Exception as e:
         st.write(f"Error fetching top USDT pairs: {e}")
         return []
+
 
 @st.cache_data(ttl=86400)  # Cache the historical data for 24 hours
 def get_historical_data(symbol, interval='1d', limit=500):
