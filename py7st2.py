@@ -6,6 +6,25 @@ from apscheduler.schedulers.background import BackgroundScheduler
 from datetime import datetime
 
 scheduler = BackgroundScheduler()
+data_cache = None  # Variable to store data fetched by the scheduler
+
+def price_format(val):
+    if isinstance(val, (int, float)):  # Check if val is a number
+        if val > 0.1:
+            return '{:,.2f}'.format(val)
+        elif val > 0.01:
+            return '{:,.4f}'.format(val)
+        elif val > 0.0001:
+            return '{:,.6f}'.format(val)
+        elif val > 0.000001:
+            return '{:,.8f}'.format(val)
+        elif val > 0.00000001:
+            return '{:,.10f}'.format(val)
+        elif val > 0.0000000001:
+            return '{:,.12f}'.format(val)
+        else:
+            return '{:,.15f}'.format(val)
+    return "N/A"  # Return "N/A" for non-numeric values
 
 def get_top_500_usdt_pairs_by_volume():
     try:
@@ -36,23 +55,19 @@ def get_historical_data(symbol, interval='1d', limit=500):
 def calculate_ema_and_breakout(df, period=34):
     df = df.copy()
     df['EMA_34'] = ta.ema(df['close'], length=period)
-    df.dropna(subset=['close', 'EMA_34'], inplace=True)
-
+    df = df.dropna(subset=['close', 'EMA_34'])
     df['difference_34'] = (df['close'] - df['EMA_34']) / df['EMA_34'] * 100
-    df['difference_34'] = df['difference_34'].apply(lambda x: f"{x:.2f}%" if pd.notna(x) else "NaN")
+    df['difference_34'] = df['difference_34'].apply(lambda x: f"{x:.2f}%")
     df['status_34'] = df.apply(lambda row: 'breakup' if row['close'] > row['EMA_34'] else 'breakdown', axis=1)
-    
     return df
 
 def calculate_ema102_and_breakout(df, period=102):
     df = df.copy()
     df['EMA_102'] = ta.ema(df['close'], length=period)
-    df.dropna(subset=['close', 'EMA_102'], inplace=True)
-
+    df = df.dropna(subset=['close', 'EMA_102'])
     df['difference_102'] = (df['close'] - df['EMA_102']) / df['EMA_102'] * 100
-    df['difference_102'] = df['difference_102'].apply(lambda x: f"{x:.2f}%" if pd.notna(x) else "NaN")
+    df['difference_102'] = df['difference_102'].apply(lambda x: f"{x:.2f}%")
     df['status_102'] = df.apply(lambda row: 'breakup' if row['close'] > row['EMA_102'] else 'breakdown', axis=1)
-    
     return df
 
 def fetch_and_process_data():
@@ -70,74 +85,49 @@ def fetch_and_process_data():
             latest_34 = df_ema34.iloc[-1]
             latest_102 = df_ema102.iloc[-1]
             if pd.notna(latest_34['EMA_34']) and pd.notna(latest_102['EMA_102']):
-                coins_data.append([
-                    symbol,
-                    latest_34['close'],
-                    latest_34['status_34'],
-                    latest_34['difference_34'],
-                    latest_102['EMA_102'],
-                    latest_102['status_102'],
-                    latest_102['difference_102']
-                ])
+                coins_data.append([symbol, latest_34['close'], latest_34['status_34'], latest_34['difference_34'],
+                                   latest_102['EMA_102'], latest_102['status_102'], latest_102['difference_102']])
 
-    result_df = pd.DataFrame(coins_data, columns=[
-        'Coin',
-        'Close Price',
-        'Status_34',
-        'Percentage Difference EMA_34',
-        'EMA_102',
-        'Status_102',
-        'Percentage Difference EMA_102'
-    ])
-    breakup_df = result_df[result_df['Status_34'] == 'breakup']
-    sorted_breakup_df = breakup_df.sort_values(by='Percentage Difference EMA_34')
-
+    # Using capitalized headings
+    result_df = pd.DataFrame(coins_data, columns=['COIN', 'CLOSE', 'STATUS34', '%DIFF34', 
+                                                  'LINE102', 'STATUS102', '%DIFF102'])
+    
+    # Apply price formatting for CLOSE and LINE102 columns
+    result_df['CLOSE'] = result_df['CLOSE'].apply(price_format)
+    result_df['LINE102'] = result_df['LINE102'].apply(price_format)
+    
+    global data_cache
+    data_cache = result_df  # Store the processed data in a global variable
     print(f"Data fetched and processed at {datetime.utcnow()}")
 
+# Scheduler to run data fetching in the background every day at 00:01 UTC
 scheduler.add_job(fetch_and_process_data, 'cron', hour=0, minute=1, timezone='UTC')
 
 def main():
     st.title("EMA Breakup Data")
+    container = st.container(border=True)
+    container.write("This Data from Binance filtered by top 500 coin by volume and shows only USDT. ")
+    container.write("This Data provide a view price is above/below Ema of 34 days and Ema of 102 days and percentage diffrence after breakup/down. ")
+    container.write("why 102 days , which is equal to 3day ema more or less only within 5% can differ so i used it, for easy calculation . ")
 
-    top_usdt_pairs = get_top_500_usdt_pairs_by_volume()
-    coins_data = []
+    # Display data with a spinner while fetching
+    with st.spinner("Fetching and processing data..."):
+        if data_cache is None:
+            fetch_and_process_data()  # Fetch data on the first load if not already cached
+        result_df = data_cache
 
-    for symbol in top_usdt_pairs:
-        df = get_historical_data(symbol, limit=500)
-        if df.empty:
-            continue
-        df_ema34 = calculate_ema_and_breakout(df)
-        df_ema102 = calculate_ema102_and_breakout(df)
+    if result_df is not None and not result_df.empty:
+        breakup_df = result_df[result_df['STATUS34'] == 'breakup']
+        sorted_breakup_df = breakup_df.sort_values(by='%DIFF34')
 
-        if not df_ema34.empty and not df_ema102.empty:
-            latest_34 = df_ema34.iloc[-1]
-            latest_102 = df_ema102.iloc[-1]
-            if pd.notna(latest_34['EMA_34']) and pd.notna(latest_102['EMA_102']):
-                coins_data.append([
-                    symbol,
-                    latest_34['close'],
-                    latest_34['status_34'],
-                    latest_34['difference_34'],
-                    latest_102['EMA_102'],
-                    latest_102['status_102'],
-                    latest_102['difference_102']
-                ])
-
-    result_df = pd.DataFrame(coins_data, columns=[
-        'Coin',
-        'Close Price',
-        'Status_34',
-        'Percentage Difference EMA_34',
-        'EMA_102',
-        'Status_102',
-        'Percentage Difference EMA_102'
-    ])
-    breakup_df = result_df[result_df['Status_34'] == 'breakup']
-    sorted_breakup_df = breakup_df.sort_values(by='Percentage Difference EMA_34')
-
-    st.dataframe(sorted_breakup_df)
+        # Display the sorted dataframe
+        st.dataframe(sorted_breakup_df)
+    else:
+        st.write("No data available. Please try again later.")
 
 if __name__ == "__main__":
     scheduler.start()
     main()
+
+
 
