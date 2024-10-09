@@ -29,11 +29,20 @@ def get_top_500_usdt_pairs_by_volume():
     try:
         response = requests.get('https://api.binance.com/api/v3/ticker/24hr')
         tickers = response.json()
-        df = pd.DataFrame(tickers)
-        df = df[df['symbol'].str.endswith('USDT')]
-        df['volume'] = pd.to_numeric(df['volume'], errors='coerce')
-        top_500_usdt_pairs = df.sort_values('volume', ascending=False).head(500)
-        return top_500_usdt_pairs['symbol'].tolist()
+        
+        # Log the response in case it's not as expected
+        print(f"API response: {tickers}")
+        
+        # Check if the response is a valid list
+        if isinstance(tickers, list):
+            df = pd.DataFrame(tickers)
+            df = df[df['symbol'].str.endswith('USDT')]
+            df['volume'] = pd.to_numeric(df['volume'], errors='coerce')
+            top_500_usdt_pairs = df.sort_values('volume', ascending=False).head(500)
+            return top_500_usdt_pairs['symbol'].tolist()
+        else:
+            print("Error: Unexpected API response structure")
+            return []
     except Exception as e:
         print(f"Error fetching top USDT pairs: {e}")
         return []
@@ -45,20 +54,26 @@ def get_historical_data(symbol, interval='1d', limit=500):
         response = requests.get(url)
         klines = response.json()
         print(f"Raw response for {symbol}: {klines}")  # Debug log
-        df = pd.DataFrame(klines, columns=['open_time', 'open', 'high', 'low', 'close', 'volume', 
-                                            'close_time', 'quote_asset_volume', 'number_of_trades', 
-                                            'taker_buy_base_asset_volume', 'taker_buy_quote_asset_volume', 
-                                            'ignore'])
-        df['close'] = pd.to_numeric(df['close'])
-        df['time'] = pd.to_datetime(df['close_time'], unit='ms')
-        return df
+        
+        # Check if the response is valid
+        if isinstance(klines, list) and len(klines) > 0:
+            df = pd.DataFrame(klines, columns=['open_time', 'open', 'high', 'low', 'close', 'volume', 
+                                                'close_time', 'quote_asset_volume', 'number_of_trades', 
+                                                'taker_buy_base_asset_volume', 'taker_buy_quote_asset_volume', 
+                                                'ignore'])
+            df['close'] = pd.to_numeric(df['close'])
+            df['time'] = pd.to_datetime(df['close_time'], unit='ms')
+            return df
+        else:
+            print(f"Error: Unexpected API response structure for {symbol}")
+            return pd.DataFrame()  # Return empty DataFrame on failure
     except Exception as e:
         print(f"Error fetching historical data for {symbol}: {e}")
         return pd.DataFrame()
 
 def calculate_ema_and_breakout(df, period=34):
     df = df.copy()
-    df['EMA_34'] = df['close'].ewm(span=period, adjust=False).mean()  # Updated to use pandas' built-in EMA
+    df['EMA_34'] = df['close'].ewm(span=period, adjust=False).mean()  # Use pandas' built-in EMA
     df = df.dropna(subset=['close', 'EMA_34'])
     df['difference_34'] = (df['close'] - df['EMA_34']) / df['EMA_34'] * 100
     df['difference_34'] = df['difference_34'].apply(lambda x: f"{x:.2f}%")
@@ -67,7 +82,7 @@ def calculate_ema_and_breakout(df, period=34):
 
 def calculate_ema102_and_breakout(df, period=102):
     df = df.copy()
-    df['EMA_102'] = df['close'].ewm(span=period, adjust=False).mean()  # Updated to use pandas' built-in EMA
+    df['EMA_102'] = df['close'].ewm(span=period, adjust=False).mean()  # Use pandas' built-in EMA
     df = df.dropna(subset=['close', 'EMA_102'])
     df['difference_102'] = (df['close'] - df['EMA_102']) / df['EMA_102'] * 100
     df['difference_102'] = df['difference_102'].apply(lambda x: f"{x:.2f}%")
@@ -161,6 +176,7 @@ def main():
 if __name__ == "__main__":
     scheduler.start()
     main()
+
     
 
 
