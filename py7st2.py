@@ -6,7 +6,6 @@ from apscheduler.schedulers.background import BackgroundScheduler
 from datetime import datetime
 
 scheduler = BackgroundScheduler()
-data_cache = None  # Variable to store data fetched by the scheduler
 
 def price_format(val):
     if isinstance(val, (int, float)):  # Check if val is a number
@@ -26,6 +25,7 @@ def price_format(val):
             return '{:,.15f}'.format(val)
     return "N/A"  # Return "N/A" for non-numeric values
 
+@st.cache_data(ttl=86400)  # Cache the data for 24 hours (86400 seconds)
 def get_top_500_usdt_pairs_by_volume():
     try:
         response = requests.get('https://api.binance.com/api/v3/ticker/24hr')
@@ -39,6 +39,7 @@ def get_top_500_usdt_pairs_by_volume():
         print(f"Error fetching top USDT pairs: {e}")
         return []
 
+@st.cache_data(ttl=86400)  # Cache the historical data for 24 hours
 def get_historical_data(symbol, interval='1d', limit=500):
     try:
         url = f'https://api.binance.com/api/v3/klines?symbol={symbol}&interval={interval}&limit={limit}'
@@ -70,6 +71,7 @@ def calculate_ema102_and_breakout(df, period=102):
     df['status_102'] = df.apply(lambda row: 'breakup' if row['close'] > row['EMA_102'] else 'breakdown', axis=1)
     return df
 
+@st.cache_data(ttl=86400)  # Cache the processed data for 24 hours
 def fetch_and_process_data():
     top_usdt_pairs = get_top_500_usdt_pairs_by_volume()
     coins_data = []
@@ -96,25 +98,36 @@ def fetch_and_process_data():
     result_df['CLOSE'] = result_df['CLOSE'].apply(price_format)
     result_df['LINE102'] = result_df['LINE102'].apply(price_format)
     
-    global data_cache
-    data_cache = result_df  # Store the processed data in a global variable
-    print(f"Data fetched and processed at {datetime.utcnow()}")
-
-# Scheduler to run data fetching in the background every day at 00:01 UTC
-scheduler.add_job(fetch_and_process_data, 'cron', hour=0, minute=1, timezone='UTC')
+    return result_df
 
 def main():
     st.title("EMA Breakup Data")
-    container = st.container(border=True)
-    container.write("This Data from Binance filtered by top 500 coin by volume and shows only USDT. ")
-    container.write("This Data provide a view price is above/below Ema of 34 days and Ema of 102 days and percentage diffrence after breakup/down. ")
-    container.write("why 102 days , which is equal to 3day ema more or less only within 5% can differ so i used it, for easy calculation . ")
+
+    # Create container with border using custom CSS
+    container = st.container()
+
+    # Add custom CSS for border
+    st.markdown(
+        """
+        <style>
+        .container {
+            border: 2px solid #4CAF50;
+            padding: 10px;
+            border-radius: 5px;
+            margin-bottom: 20px;
+        }
+        </style>
+        """, unsafe_allow_html=True
+    )
+
+    with container:
+        st.write("**This data is from Binance filtered by top 500 coins by volume and shows only USDT.**")
+        st.write("**The data provides a view of whether the price is above or below EMA of 34 days and EMA of 102 days, as well as the percentage difference after breakup/down.**")
+        st.write("**Why 102 days? It is roughly equal to the 3-day EMA, which usually differs by only around 5%. This makes calculations easier.**")
 
     # Display data with a spinner while fetching
     with st.spinner("Fetching and processing data..."):
-        if data_cache is None:
-            fetch_and_process_data()  # Fetch data on the first load if not already cached
-        result_df = data_cache
+        result_df = fetch_and_process_data()  # Fetch and cache the data for the day
 
     if result_df is not None and not result_df.empty:
         breakup_df = result_df[result_df['STATUS34'] == 'breakup']
