@@ -1,14 +1,15 @@
+
 import streamlit as st
 import pandas as pd
-import pandas_ta as ta
 import requests
+import numpy as np
 from apscheduler.schedulers.background import BackgroundScheduler
 from datetime import datetime
 
 scheduler = BackgroundScheduler()
 
 def price_format(val):
-    if isinstance(val, (int, float)):  # Check if val is a number
+    if isinstance(val, (int, float)):
         if val > 0.1:
             return '{:,.2f}'.format(val)
         elif val > 0.01:
@@ -23,9 +24,9 @@ def price_format(val):
             return '{:,.12f}'.format(val)
         else:
             return '{:,.15f}'.format(val)
-    return "N/A"  # Return "N/A" for non-numeric values
+    return "N/A"
 
-@st.cache_data(ttl=86400)  # Cache the data for 24 hours (86400 seconds)
+@st.cache_data(ttl=86400)
 def get_top_500_usdt_pairs_by_volume():
     try:
         response = requests.get('https://api.binance.com/api/v3/ticker/24hr')
@@ -39,7 +40,7 @@ def get_top_500_usdt_pairs_by_volume():
         print(f"Error fetching top USDT pairs: {e}")
         return []
 
-@st.cache_data(ttl=86400)  # Cache the historical data for 24 hours
+@st.cache_data(ttl=86400)
 def get_historical_data(symbol, interval='1d', limit=500):
     try:
         url = f'https://api.binance.com/api/v3/klines?symbol={symbol}&interval={interval}&limit={limit}'
@@ -53,9 +54,17 @@ def get_historical_data(symbol, interval='1d', limit=500):
         print(f"Error fetching historical data for {symbol}: {e}")
         return pd.DataFrame()
 
+def calculate_ema(data, period):
+    alpha = 2 / (period + 1)
+    ema_values = [data[0]]  # Start with the first value
+    for price in data[1:]:
+        new_ema = (price - ema_values[-1]) * alpha + ema_values[-1]
+        ema_values.append(new_ema)
+    return ema_values
+
 def calculate_ema_and_breakout(df, period=34):
     df = df.copy()
-    df['EMA_34'] = ta.ema(df['close'], length=period)
+    df['EMA_34'] = calculate_ema(df['close'].values, period)
     df = df.dropna(subset=['close', 'EMA_34'])
     df['difference_34'] = (df['close'] - df['EMA_34']) / df['EMA_34'] * 100
     df['difference_34'] = df['difference_34'].apply(lambda x: f"{x:.2f}%")
@@ -64,14 +73,14 @@ def calculate_ema_and_breakout(df, period=34):
 
 def calculate_ema102_and_breakout(df, period=102):
     df = df.copy()
-    df['EMA_102'] = ta.ema(df['close'], length=period)
+    df['EMA_102'] = calculate_ema(df['close'].values, period)
     df = df.dropna(subset=['close', 'EMA_102'])
     df['difference_102'] = (df['close'] - df['EMA_102']) / df['EMA_102'] * 100
     df['difference_102'] = df['difference_102'].apply(lambda x: f"{x:.2f}%")
     df['status_102'] = df.apply(lambda row: 'breakup' if row['close'] > row['EMA_102'] else 'breakdown', axis=1)
     return df
 
-@st.cache_data(ttl=86400)  # Cache the processed data for 24 hours
+@st.cache_data(ttl=86400)
 def fetch_and_process_data():
     top_usdt_pairs = get_top_500_usdt_pairs_by_volume()
     coins_data = []
@@ -90,11 +99,9 @@ def fetch_and_process_data():
                 coins_data.append([symbol, latest_34['close'], latest_34['status_34'], latest_34['difference_34'],
                                    latest_102['EMA_102'], latest_102['status_102'], latest_102['difference_102']])
 
-    # Using capitalized headings
     result_df = pd.DataFrame(coins_data, columns=['COIN', 'CLOSE', 'STATUS34', '%DIFF34', 
                                                   'LINE102', 'STATUS102', '%DIFF102'])
     
-    # Apply price formatting for CLOSE and LINE102 columns
     result_df['CLOSE'] = result_df['CLOSE'].apply(price_format)
     result_df['LINE102'] = result_df['LINE102'].apply(price_format)
     
@@ -103,10 +110,8 @@ def fetch_and_process_data():
 def main():
     st.title("EMA Breakup Data")
 
-    # Create container with border using custom CSS
     container = st.container()
 
-    # Add custom CSS for border
     st.markdown(
         """
         <style>
@@ -125,15 +130,13 @@ def main():
         st.write("**The data provides a view of whether the price is above or below EMA of 34 days and EMA of 102 days, as well as the percentage difference after breakup/down.**")
         st.write("**Why 102 days? It is roughly equal to the 3-day EMA, which usually differs by only around 5%. This makes calculations easier.**")
 
-    # Display data with a spinner while fetching
     with st.spinner("Fetching and processing data..."):
-        result_df = fetch_and_process_data()  # Fetch and cache the data for the day
+        result_df = fetch_and_process_data()
 
     if result_df is not None and not result_df.empty:
         breakup_df = result_df[result_df['STATUS34'] == 'breakup']
         sorted_breakup_df = breakup_df.sort_values(by='%DIFF34')
 
-        # Display the sorted dataframe
         st.dataframe(sorted_breakup_df)
     else:
         st.write("No data available. Please try again later.")
@@ -141,6 +144,7 @@ def main():
 if __name__ == "__main__":
     scheduler.start()
     main()
+    
 
 
 
