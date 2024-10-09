@@ -39,12 +39,13 @@ def get_top_500_usdt_pairs_by_volume():
             df = df[df['symbol'].str.endswith('USDT')]
             df['volume'] = pd.to_numeric(df['volume'], errors='coerce')
             top_500_usdt_pairs = df.sort_values('volume', ascending=False).head(500)
+            st.write(top_500_usdt_pairs['symbol'].tolist())
             return top_500_usdt_pairs['symbol'].tolist()
         else:
-            print("Error: Unexpected API response structure")
+            st.write("Error: Unexpected API response structure")
             return []
     except Exception as e:
-        print(f"Error fetching top USDT pairs: {e}")
+        st.write(f"Error fetching top USDT pairs: {e}")
         return []
 
 @st.cache_data(ttl=86400)  # Cache the historical data for 24 hours
